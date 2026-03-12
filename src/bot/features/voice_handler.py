@@ -157,12 +157,22 @@ class VoiceHandler:
                 response.raise_for_status()
                 data = response.json()
         except Exception as exc:
-            logger.warning(
+            # Log full details for debugging
+            resp_text = ""
+            try:
+                resp_text = response.text[:500]  # type: ignore[possibly-undefined]
+            except Exception:
+                pass
+            logger.error(
                 "Gemini transcription request failed",
                 error_type=type(exc).__name__,
+                error_msg=str(exc),
                 model=model,
+                response_body=resp_text,
             )
-            raise RuntimeError("Gemini transcription request failed.") from exc
+            raise RuntimeError(
+                f"Gemini transcription failed: {exc}"
+            ) from exc
 
         # Extract text from Gemini response
         try:
