@@ -31,6 +31,7 @@ from telegram.ext import (
 from ..claude.sdk_integration import StreamUpdate
 from ..config.settings import Settings
 from ..projects import PrivateTopicsUnavailableError
+from .update_processor import StopAwareUpdateProcessor
 from .utils.draft_streamer import DraftStreamer, generate_draft_id
 from .utils.html_format import escape_html
 from .utils.image_extractor import (
@@ -109,12 +110,21 @@ def _tool_icon(name: str) -> str:
     return _TOOL_ICONS.get(name, "\U0001f527")
 
 
+
+from dataclasses import dataclass as _dataclass, field as _field
+
+@_dataclass
+class ActiveRequest:
+    interrupt_event: asyncio.Event = _field(default_factory=asyncio.Event)
+    progress_msg: object = None
+
 class MessageOrchestrator:
     """Routes messages based on mode. Single entry point for all Telegram updates."""
 
     def __init__(self, settings: Settings, deps: Dict[str, Any]):
         self.settings = settings
         self.deps = deps
+        self._active_requests: Dict[int, ActiveRequest] = {}
 
     def _inject_deps(self, handler: Callable) -> Callable:  # type: ignore[type-arg]
         """Wrap handler to inject dependencies into context.bot_data."""
@@ -405,6 +415,7 @@ class MessageOrchestrator:
             CallbackQueryHandler(self._inject_deps(callback.handle_callback_query))
         )
 
+        app.add_handler(CallbackQueryHandler(self._inject_deps(self._handle_stop_callback), pattern=r"^stop:"))
         logger.info("Classic handlers registered (13 commands + full handler set)")
 
     async def get_bot_commands(self) -> list:  # type: ignore[type-arg]
@@ -443,6 +454,35 @@ class MessageOrchestrator:
             return commands
 
     # --- Agentic handlers ---
+
+
+    async def _handle_stop_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle stop: callbacks - interrupt a running Claude request."""
+        query = update.callback_query
+        if query is None or query.data is None:
+            return
+        try:
+            user_id = int(query.data.split(":", 1)[1])
+        except (IndexError, ValueError):
+            await query.answer("Invalid stop request.", show_alert=True)
+            return
+        if query.from_user is None or query.from_user.id != user_id:
+            await query.answer("Only the requesting user can stop this.", show_alert=True)
+            return
+        active = self._active_requests.get(user_id)
+        if active is None:
+            await query.answer("No active request to stop.", show_alert=False)
+            return
+        if active.interrupt_event.is_set():
+            await query.answer("Already stopping...", show_alert=False)
+            return
+        active.interrupt_event.set()
+        await query.answer("Stopping...", show_alert=False)
+        try:
+            if active.progress_msg is not None:
+                await active.progress_msg.edit_text("Stopping...", reply_markup=None)
+        except Exception:
+            pass
 
     async def agentic_start(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -678,6 +718,7 @@ class MessageOrchestrator:
         mcp_images: Optional[List[ImageAttachment]] = None,
         approved_directory: Optional[Path] = None,
         draft_streamer: Optional[DraftStreamer] = None,
+        stop_markup: Any = None,
     ) -> Optional[Callable[[StreamUpdate], Any]]:
         """Create a stream callback for verbose progress updates.
 
@@ -765,7 +806,7 @@ class MessageOrchestrator:
                         tool_log, verbose_level, start_time
                     )
                     try:
-                        await progress_msg.edit_text(new_text)
+                        await progress_msg.edit_text(new_text, reply_markup=stop_markup)
                     except Exception:
                         pass
 
@@ -885,7 +926,14 @@ class MessageOrchestrator:
         await chat.send_action("typing")
 
         verbose_level = self._get_verbose_level(context)
-        progress_msg = await update.message.reply_text("Working...")
+        # Create interrupt event and stop keyboard
+        _interrupt_event = asyncio.Event()
+        _stop_kb = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("\u23f9 Stop", callback_data=f"stop:{user_id}")]]
+        )
+        progress_msg = await update.message.reply_text("Working...", reply_markup=_stop_kb)
+        _active_req = ActiveRequest(interrupt_event=_interrupt_event, progress_msg=progress_msg)
+        self._active_requests[user_id] = _active_req
 
         claude_integration = context.bot_data.get("claude_integration")
         if not claude_integration:
@@ -927,6 +975,7 @@ class MessageOrchestrator:
             mcp_images=mcp_images,
             approved_directory=self.settings.approved_directory,
             draft_streamer=draft_streamer,
+            stop_markup=_stop_kb,
         )
 
         # Independent typing heartbeat — stays alive even with no stream events
@@ -941,8 +990,15 @@ class MessageOrchestrator:
                 session_id=session_id,
                 on_stream=on_stream,
                 force_new=force_new,
+                interrupt_event=_interrupt_event,
             )
 
+            # Cleanup stop button
+            self._active_requests.pop(user_id, None)
+            try:
+                await progress_msg.edit_reply_markup(reply_markup=None)
+            except Exception:
+                pass
             # New session created successfully — clear the one-shot flag
             if force_new:
                 context.user_data["force_new_session"] = False

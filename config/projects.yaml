@@ -1,0 +1,35 @@
+projects:
+  - slug: oracle-ruh
+    name: Оракул Духа
+    path: oracle-ruh
+    enabled: true
+
+  - slug: ccbot
+    name: CCBot
+    path: ccbot
+    enabled: true
+
+  - slug: claude-code-telegram
+    name: Claude Code Telegram
+    path: claude-code-telegram
+    enabled: true
+
+  - slug: jyotish
+    name: Jyotish Dev
+    path: jyotish-dev
+    enabled: true
+
+  - slug: fullenergy-ai-landing
+    name: "Лендинги и сайты"
+    path: fullenergy-ai-landing
+    enabled: true
+
+  - slug: co-pilot
+    name: Co-Pilot
+    path: Co-Pilot
+    enabled: true
+
+  - slug: fullenergy-ai
+    name: Full Energy AI
+    path: fullenergy-ai
+    enabled: true

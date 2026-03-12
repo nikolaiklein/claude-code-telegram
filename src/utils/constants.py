@@ -61,6 +61,22 @@ ALLOWED_FILE_EXTENSIONS = {
     ".sql",
     ".sh",
     ".bash",
+    # Documents
+    ".pdf",
+    ".docx",
+    ".doc",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".rtf",
+    ".odt",
+    ".pptx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
 }
 
 # Security patterns to block

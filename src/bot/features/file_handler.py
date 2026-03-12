@@ -138,6 +138,18 @@ class FileHandler:
         # Download file
         file_path = await self._download_file(document)
 
+        # Keep a persistent copy in /root/uploads/
+        uploads_dir = Path("/root/uploads")
+        uploads_dir.mkdir(exist_ok=True)
+        persistent_copy = uploads_dir / file_path.name
+        if persistent_copy.exists():
+            stem, suffix = file_path.stem, file_path.suffix
+            i = 1
+            while persistent_copy.exists():
+                persistent_copy = uploads_dir / f"{stem}_{i}{suffix}"
+                i += 1
+        shutil.copy2(file_path, persistent_copy)
+
         try:
             # Detect file type
             file_type = self._detect_file_type(file_path)
