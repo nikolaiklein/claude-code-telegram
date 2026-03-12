@@ -1,4 +1,4 @@
-"""Handle voice message transcription via Mistral (Voxtral) or OpenAI (Whisper)."""
+"""Handle voice message transcription via Mistral, OpenAI, or Gemini."""
 
 from dataclasses import dataclass
 from datetime import timedelta
@@ -22,7 +22,7 @@ class ProcessedVoice:
 
 
 class VoiceHandler:
-    """Transcribe Telegram voice messages using Mistral or OpenAI."""
+    """Transcribe Telegram voice messages using Mistral, OpenAI, or Gemini."""
 
     def __init__(self, config: Settings):
         self.config = config
@@ -81,8 +81,8 @@ class VoiceHandler:
 
         if self.config.voice_provider == "openai":
             transcription = await self._transcribe_openai(voice_bytes)
-        elif self.config.voice_provider == "litellm":
-            transcription = await self._transcribe_litellm(voice_bytes)
+        elif self.config.voice_provider == "gemini":
+            transcription = await self._transcribe_gemini(voice_bytes)
         else:
             transcription = await self._transcribe_mistral(voice_bytes)
 
@@ -105,8 +105,10 @@ class VoiceHandler:
             duration=duration_secs,
         )
 
-    async def _transcribe_litellm(self, voice_bytes: bytes) -> str:
-        """Transcribe audio using LiteLLM proxy (Gemini Flash)."""
+    async def _transcribe_gemini(self, voice_bytes: bytes) -> str:
+        """Transcribe audio using Google Gemini REST API directly."""
+        import base64
+
         try:
             import httpx
         except ModuleNotFoundError as exc:
@@ -115,27 +117,61 @@ class VoiceHandler:
                 "Install it: pip install httpx"
             ) from exc
 
-        url = self.config.litellm_base_url.rstrip("/") + "/v1/audio/transcriptions"
+        api_key = self.config.gemini_api_key_str
+        if not api_key:
+            raise RuntimeError("Gemini API key is not configured (GEMINI_API_KEY).")
+
+        model = self.config.gemini_voice_model
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/"
+            f"models/{model}:generateContent?key={api_key}"
+        )
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "inline_data": {
+                                "mime_type": "audio/ogg",
+                                "data": base64.b64encode(voice_bytes).decode(),
+                            }
+                        },
+                        {
+                            "text": (
+                                "Transcribe this audio message exactly as spoken. "
+                                "Return only the transcription text, nothing else."
+                            )
+                        },
+                    ]
+                }
+            ]
+        }
+
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     url,
-                    files={"file": ("voice.ogg", voice_bytes, "audio/ogg")},
-                    data={"model": self.config.litellm_voice_model},
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
                 )
                 response.raise_for_status()
                 data = response.json()
         except Exception as exc:
             logger.warning(
-                "LiteLLM transcription request failed",
+                "Gemini transcription request failed",
                 error_type=type(exc).__name__,
-                url=url,
+                model=model,
             )
-            raise RuntimeError("LiteLLM transcription request failed.") from exc
+            raise RuntimeError("Gemini transcription request failed.") from exc
 
-        text = (data.get("text") or "").strip()
+        # Extract text from Gemini response
+        try:
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except (KeyError, IndexError, AttributeError):
+            raise ValueError("Gemini returned unexpected response format.")
+
         if not text:
-            raise ValueError("LiteLLM transcription returned an empty response.")
+            raise ValueError("Gemini transcription returned an empty response.")
         return text
 
     async def _transcribe_mistral(self, voice_bytes: bytes) -> str:

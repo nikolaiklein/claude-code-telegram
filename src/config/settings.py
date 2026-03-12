@@ -169,9 +169,9 @@ class Settings(BaseSettings):
     enable_voice_messages: bool = Field(
         True, description="Enable voice message transcription"
     )
-    voice_provider: Literal["mistral", "openai", "litellm"] = Field(
+    voice_provider: Literal["mistral", "openai", "gemini"] = Field(
         "mistral",
-        description="Voice transcription provider: 'mistral', 'openai', or 'litellm'",
+        description="Voice transcription provider: 'mistral', 'openai', or 'gemini'",
     )
     mistral_api_key: Optional[SecretStr] = Field(
         None, description="Mistral API key for voice transcription"
@@ -179,13 +179,12 @@ class Settings(BaseSettings):
     openai_api_key: Optional[SecretStr] = Field(
         None, description="OpenAI API key for Whisper voice transcription"
     )
-    litellm_base_url: str = Field(
-        "http://localhost:4000",
-        description="LiteLLM base URL for voice transcription (Gemini via LiteLLM)",
+    gemini_api_key: Optional[SecretStr] = Field(
+        None, description="Google Gemini API key for voice transcription"
     )
-    litellm_voice_model: str = Field(
+    gemini_voice_model: str = Field(
         "gemini-2.0-flash",
-        description="Model to use for LiteLLM voice transcription",
+        description="Gemini model for voice transcription",
     )
     voice_transcription_model: Optional[str] = Field(
         None,
@@ -403,8 +402,8 @@ class Settings(BaseSettings):
         if v is None:
             return "mistral"
         provider = str(v).strip().lower()
-        if provider not in {"mistral", "openai", "litellm"}:
-            raise ValueError("voice_provider must be one of ['mistral', 'openai', 'litellm']")
+        if provider not in {"mistral", "openai", "gemini"}:
+            raise ValueError("voice_provider must be one of ['mistral', 'openai', 'gemini']")
         return provider
 
     @field_validator("project_threads_chat_id", mode="before")
@@ -505,14 +504,19 @@ class Settings(BaseSettings):
         return self.openai_api_key.get_secret_value() if self.openai_api_key else None
 
     @property
+    def gemini_api_key_str(self) -> Optional[str]:
+        """Get Gemini API key as string."""
+        return self.gemini_api_key.get_secret_value() if self.gemini_api_key else None
+
+    @property
     def resolved_voice_model(self) -> str:
         """Get the voice transcription model, with provider-specific defaults."""
         if self.voice_transcription_model:
             return self.voice_transcription_model
         if self.voice_provider == "openai":
             return "whisper-1"
-        if self.voice_provider == "litellm":
-            return self.litellm_voice_model
+        if self.voice_provider == "gemini":
+            return self.gemini_voice_model
         return "voxtral-mini-latest"
 
     @property
@@ -525,8 +529,8 @@ class Settings(BaseSettings):
         """API key environment variable required for the configured voice provider."""
         if self.voice_provider == "openai":
             return "OPENAI_API_KEY"
-        if self.voice_provider == "litellm":
-            return "LITELLM_BASE_URL"
+        if self.voice_provider == "gemini":
+            return "GEMINI_API_KEY"
         return "MISTRAL_API_KEY"
 
     @property
@@ -534,6 +538,6 @@ class Settings(BaseSettings):
         """Human-friendly label for the configured voice provider."""
         if self.voice_provider == "openai":
             return "OpenAI Whisper"
-        if self.voice_provider == "litellm":
-            return "LiteLLM (Gemini)"
+        if self.voice_provider == "gemini":
+            return "Gemini Flash"
         return "Mistral Voxtral"

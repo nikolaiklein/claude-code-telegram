@@ -80,9 +80,9 @@ class FeatureRegistry:
 
         # Voice transcription - requires provider-specific API key
         voice_key_available = (
-            (self.config.voice_provider == openai and bool(self.config.openai_api_key))
-            or (self.config.voice_provider == mistral and bool(self.config.mistral_api_key))
-            or (self.config.voice_provider == litellm)
+            (self.config.voice_provider == "openai" and bool(self.config.openai_api_key))
+            or (self.config.voice_provider == "mistral" and bool(self.config.mistral_api_key))
+            or (self.config.voice_provider == "gemini" and bool(self.config.gemini_api_key))
         )
         if self.config.enable_voice_messages and voice_key_available:
             try:
