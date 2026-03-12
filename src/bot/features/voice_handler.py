@@ -81,6 +81,8 @@ class VoiceHandler:
 
         if self.config.voice_provider == "openai":
             transcription = await self._transcribe_openai(voice_bytes)
+        elif self.config.voice_provider == "litellm":
+            transcription = await self._transcribe_litellm(voice_bytes)
         else:
             transcription = await self._transcribe_mistral(voice_bytes)
 
@@ -102,6 +104,39 @@ class VoiceHandler:
             transcription=transcription,
             duration=duration_secs,
         )
+
+    async def _transcribe_litellm(self, voice_bytes: bytes) -> str:
+        """Transcribe audio using LiteLLM proxy (Gemini Flash)."""
+        try:
+            import httpx
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Optional dependency 'httpx' is missing. "
+                "Install it: pip install httpx"
+            ) from exc
+
+        url = self.config.litellm_base_url.rstrip("/") + "/v1/audio/transcriptions"
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    url,
+                    files={"file": ("voice.ogg", voice_bytes, "audio/ogg")},
+                    data={"model": self.config.litellm_voice_model},
+                )
+                response.raise_for_status()
+                data = response.json()
+        except Exception as exc:
+            logger.warning(
+                "LiteLLM transcription request failed",
+                error_type=type(exc).__name__,
+                url=url,
+            )
+            raise RuntimeError("LiteLLM transcription request failed.") from exc
+
+        text = (data.get("text") or "").strip()
+        if not text:
+            raise ValueError("LiteLLM transcription returned an empty response.")
+        return text
 
     async def _transcribe_mistral(self, voice_bytes: bytes) -> str:
         """Transcribe audio using the Mistral API (Voxtral)."""

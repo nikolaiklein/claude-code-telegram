@@ -169,15 +169,23 @@ class Settings(BaseSettings):
     enable_voice_messages: bool = Field(
         True, description="Enable voice message transcription"
     )
-    voice_provider: Literal["mistral", "openai"] = Field(
+    voice_provider: Literal["mistral", "openai", "litellm"] = Field(
         "mistral",
-        description="Voice transcription provider: 'mistral' or 'openai'",
+        description="Voice transcription provider: 'mistral', 'openai', or 'litellm'",
     )
     mistral_api_key: Optional[SecretStr] = Field(
         None, description="Mistral API key for voice transcription"
     )
     openai_api_key: Optional[SecretStr] = Field(
         None, description="OpenAI API key for Whisper voice transcription"
+    )
+    litellm_base_url: str = Field(
+        "http://localhost:4000",
+        description="LiteLLM base URL for voice transcription (Gemini via LiteLLM)",
+    )
+    litellm_voice_model: str = Field(
+        "gemini-2.0-flash",
+        description="Model to use for LiteLLM voice transcription",
     )
     voice_transcription_model: Optional[str] = Field(
         None,
@@ -395,8 +403,8 @@ class Settings(BaseSettings):
         if v is None:
             return "mistral"
         provider = str(v).strip().lower()
-        if provider not in {"mistral", "openai"}:
-            raise ValueError("voice_provider must be one of ['mistral', 'openai']")
+        if provider not in {"mistral", "openai", "litellm"}:
+            raise ValueError("voice_provider must be one of ['mistral', 'openai', 'litellm']")
         return provider
 
     @field_validator("project_threads_chat_id", mode="before")
@@ -503,6 +511,8 @@ class Settings(BaseSettings):
             return self.voice_transcription_model
         if self.voice_provider == "openai":
             return "whisper-1"
+        if self.voice_provider == "litellm":
+            return self.litellm_voice_model
         return "voxtral-mini-latest"
 
     @property
@@ -515,6 +525,8 @@ class Settings(BaseSettings):
         """API key environment variable required for the configured voice provider."""
         if self.voice_provider == "openai":
             return "OPENAI_API_KEY"
+        if self.voice_provider == "litellm":
+            return "LITELLM_BASE_URL"
         return "MISTRAL_API_KEY"
 
     @property
@@ -522,4 +534,6 @@ class Settings(BaseSettings):
         """Human-friendly label for the configured voice provider."""
         if self.voice_provider == "openai":
             return "OpenAI Whisper"
+        if self.voice_provider == "litellm":
+            return "LiteLLM (Gemini)"
         return "Mistral Voxtral"
