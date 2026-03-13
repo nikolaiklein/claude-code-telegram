@@ -1188,20 +1188,48 @@ class MessageOrchestrator:
         if not file_handler:
             file = await document.get_file()
             file_bytes = await file.download_as_bytearray()
+            caption = update.message.caption or "Please review this file:"
             try:
                 content = file_bytes.decode("utf-8")
                 if len(content) > 50000:
                     content = content[:50000] + "\n... (truncated)"
-                caption = update.message.caption or "Please review this file:"
                 prompt = (
                     f"{caption}\n\n**File:** `{document.file_name}`\n\n"
                     f"```\n{content}\n```"
                 )
             except UnicodeDecodeError:
-                await progress_msg.edit_text(
-                    "Unsupported file format. Must be text-based (UTF-8)."
-                )
-                return
+                # Binary file (PDF, DOCX, image, etc.) — save and pass path
+                from pathlib import Path as _Path
+
+                uploads_dir = _Path("/root/uploads")
+                uploads_dir.mkdir(exist_ok=True)
+                file_name = document.file_name or "uploaded_file"
+                dest = uploads_dir / file_name
+                if dest.exists():
+                    stem, suffix = dest.stem, dest.suffix
+                    i = 1
+                    while dest.exists():
+                        dest = uploads_dir / f"{stem}_{i}{suffix}"
+                        i += 1
+                with open(dest, "wb") as f:
+                    f.write(file_bytes)
+                has_caption = caption != "Please review this file:"
+                if has_caption:
+                    prompt = (
+                        f"{caption}\n\n"
+                        f"File: **{file_name}** "
+                        f"({len(file_bytes) / 1024:.1f}KB)\n"
+                        f"Path: `{dest}`"
+                    )
+                else:
+                    prompt = (
+                        f"User uploaded file: **{file_name}** "
+                        f"({len(file_bytes) / 1024:.1f}KB)\n"
+                        f"Path: `{dest}`\n\n"
+                        f"The file has been saved. Acknowledge receipt and "
+                        f"wait for the user's instructions. "
+                        f"Do NOT analyze or process it unless asked."
+                    )
 
         # Process with Claude
         claude_integration = context.bot_data.get("claude_integration")

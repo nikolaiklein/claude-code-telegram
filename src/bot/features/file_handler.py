@@ -161,8 +161,15 @@ class FileHandler:
                 return await self._process_code_file(file_path, context)
             elif file_type == "text":
                 return await self._process_text_file(file_path, context)
+            elif file_type in ("document", "image"):
+                return self._process_binary_file(
+                    file_path, persistent_copy, file_type, context
+                )
             else:
-                raise ValueError(f"Unsupported file type: {file_type}")
+                # Last resort: pass file path to Claude for any unrecognized type
+                return self._process_binary_file(
+                    file_path, persistent_copy, "file", context
+                )
 
         finally:
             # Cleanup
@@ -182,6 +189,35 @@ class FileHandler:
 
         return file_path
 
+    # Document formats that Claude Code can read via its Read tool
+    DOCUMENT_EXTENSIONS = {
+        ".pdf",
+        ".docx",
+        ".doc",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".rtf",
+        ".odt",
+        ".pptx",
+        ".ppt",
+        ".epub",
+    }
+
+    # Image formats that Claude Code can view via its Read tool
+    IMAGE_EXTENSIONS = {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".svg",
+        ".webp",
+        ".bmp",
+        ".tiff",
+        ".tif",
+        ".ico",
+    }
+
     def _detect_file_type(self, file_path: Path) -> str:
         """Detect file type based on extension and content"""
         ext = file_path.suffix.lower()
@@ -189,6 +225,14 @@ class FileHandler:
         # Check if archive
         if ext in {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z"}:
             return "archive"
+
+        # Check if document (PDF, DOCX, etc.) — binary but Claude can read
+        if ext in self.DOCUMENT_EXTENSIONS:
+            return "document"
+
+        # Check if image — binary but Claude can view
+        if ext in self.IMAGE_EXTENSIONS:
+            return "image"
 
         # Check if code
         if ext in self.code_extensions:
@@ -308,6 +352,57 @@ class FileHandler:
             metadata={
                 "lines": len(content.splitlines()),
                 "size": file_path.stat().st_size,
+            },
+        )
+
+    def _process_binary_file(
+        self,
+        file_path: Path,
+        persistent_path: Path,
+        file_type: str,
+        context: str,
+    ) -> ProcessedFile:
+        """Process binary file (PDF, DOCX, image, etc.) by passing its path to Claude.
+
+        Claude Code can natively read PDFs and view images via its Read tool,
+        so we just provide the persistent file path in the prompt.
+        """
+        file_name = file_path.name
+        size = file_path.stat().st_size
+
+        type_labels = {
+            "document": "document",
+            "image": "image",
+            "file": "file",
+        }
+        label = type_labels.get(file_type, "file")
+
+        # If user provided a caption, use it as instruction.
+        # Otherwise just acknowledge the file — don't auto-analyze.
+        has_caption = context and context.strip() != "Please review this file:"
+        if has_caption:
+            prompt = (
+                f"{context}\n\n"
+                f"File: **{file_name}** ({self._format_size(size)})\n"
+                f"Path: `{persistent_path}`"
+            )
+        else:
+            prompt = (
+                f"User uploaded {label}: **{file_name}** "
+                f"({self._format_size(size)})\n"
+                f"Path: `{persistent_path}`\n\n"
+                f"The file has been saved. Acknowledge receipt and wait for "
+                f"the user's instructions on what to do with it. "
+                f"Do NOT analyze or process it unless asked."
+            )
+
+        return ProcessedFile(
+            type=file_type,
+            prompt=prompt,
+            metadata={
+                "file_name": file_name,
+                "file_path": str(persistent_path),
+                "size": size,
             },
         )
 
